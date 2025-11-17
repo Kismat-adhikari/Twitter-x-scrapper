@@ -49,9 +49,43 @@
             <div id="status" class="status hidden">
                 <div class="loader"></div>
                 <p id="statusText">Scraping in progress...</p>
+                <div class="progress-container">
+                    <div class="progress-bar" id="progressBar">
+                        <span id="progressText">0%</span>
+                    </div>
+                </div>
+                <p id="progressInfo">0 / 0 tweets</p>
             </div>
             
             <div id="result" class="result hidden"></div>
+        </div>
+    </div>
+    
+    <!-- Real-time Tweets Table -->
+    <div class="container" id="tweetsContainer" style="display: none;">
+        <h2>📊 Scraped Tweets (Real-time)</h2>
+        <div class="table-container">
+            <table id="tweetsTable">
+                <thead>
+                    <tr>
+                        <th>Tweet ID</th>
+                        <th>Username</th>
+                        <th>Display Name</th>
+                        <th>Text</th>
+                        <th>Timestamp</th>
+                        <th>Likes</th>
+                        <th>Retweets</th>
+                        <th>Replies</th>
+                        <th>Hashtags</th>
+                        <th>Mentions</th>
+                        <th>Type</th>
+                        <th>Link</th>
+                    </tr>
+                </thead>
+                <tbody id="tweetsBody">
+                    <!-- Tweets will be inserted here -->
+                </tbody>
+            </table>
         </div>
     </div>
     

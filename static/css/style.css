@@ -130,3 +130,100 @@ button:disabled {
 .hidden {
     display: none;
 }
+
+/* Progress Bar */
+.progress-container {
+    width: 100%;
+    height: 30px;
+    background: #e0e0e0;
+    border-radius: 15px;
+    overflow: hidden;
+    margin: 15px 0;
+}
+
+.progress-bar {
+    height: 100%;
+    background: linear-gradient(90deg, #667eea 0%, #764ba2 100%);
+    width: 0%;
+    transition: width 0.3s ease;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: white;
+    font-weight: 600;
+}
+
+#progressInfo {
+    text-align: center;
+    color: #667eea;
+    font-weight: 600;
+    margin-top: 10px;
+}
+
+/* Tweets Table */
+.table-container {
+    background: white;
+    padding: 20px;
+    border-radius: 15px;
+    box-shadow: 0 10px 30px rgba(0,0,0,0.1);
+    margin-top: 20px;
+    overflow-x: auto;
+}
+
+#tweetsTable {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 14px;
+}
+
+#tweetsTable thead {
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    color: white;
+}
+
+#tweetsTable th {
+    padding: 12px;
+    text-align: left;
+    font-weight: 600;
+    white-space: nowrap;
+}
+
+#tweetsTable td {
+    padding: 10px 12px;
+    border-bottom: 1px solid #e0e0e0;
+}
+
+#tweetsTable tbody tr:hover {
+    background: #f5f5f5;
+}
+
+#tweetsTable tbody tr:nth-child(even) {
+    background: #fafafa;
+}
+
+#tweetsTable tbody tr:nth-child(even):hover {
+    background: #f0f0f0;
+}
+
+.tweet-text {
+    max-width: 300px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.tweet-link {
+    color: #667eea;
+    text-decoration: none;
+    font-weight: 600;
+}
+
+.tweet-link:hover {
+    text-decoration: underline;
+}
+
+h2 {
+    color: white;
+    text-align: center;
+    margin-bottom: 20px;
+}

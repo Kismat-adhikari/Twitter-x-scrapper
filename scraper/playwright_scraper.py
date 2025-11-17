@@ -22,6 +22,7 @@ class TwitterScraper:
         # Initialize CSV handler
         self.csv_handler = CSVHandler(job_id)
         self.scraping_username = username  # Store if we're scraping a user profile
+        self.job_id = job_id  # Store job ID for progress updates
         
         # Build search URL
         search_url = self.build_url(keyword, hashtag, username, tweet_url)
@@ -146,6 +147,9 @@ class TwitterScraper:
                             with self.lock:
                                 self.total_scraped += 1
                                 current_total = self.total_scraped
+                                
+                                # Update progress in active_jobs
+                                self.update_progress(current_total, target_tweets)
                             
                             # Check if we've reached target
                             if current_total >= target_tweets:
@@ -639,3 +643,11 @@ class TwitterScraper:
             return '0'
         except Exception as e:
             return '0'
+
+    def update_progress(self, current, target):
+        """Update progress in active_jobs for real-time frontend updates"""
+        if self.job_id:
+            from app import active_jobs
+            if self.job_id in active_jobs:
+                active_jobs[self.job_id]['progress'] = int((current / target) * 100)
+                active_jobs[self.job_id]['current'] = current

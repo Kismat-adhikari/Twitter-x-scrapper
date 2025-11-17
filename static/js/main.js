@@ -57,28 +57,80 @@ document.getElementById('scrapeForm').addEventListener('submit', async (e) => {
 });
 
 async function pollStatus(jobId) {
+    // Show tweets container
+    document.getElementById('tweetsContainer').style.display = 'block';
+    
     const interval = setInterval(async () => {
         try {
-            const response = await fetch(`/status/${jobId}`);
-            const data = await response.json();
+            // Get status
+            const statusResponse = await fetch(`/status/${jobId}`);
+            const statusData = await statusResponse.json();
             
-            if (data.status === 'completed') {
+            // Update progress bar
+            if (statusData.progress !== undefined) {
+                const progressBar = document.getElementById('progressBar');
+                const progressText = document.getElementById('progressText');
+                const progressInfo = document.getElementById('progressInfo');
+                
+                progressBar.style.width = statusData.progress + '%';
+                progressText.textContent = statusData.progress + '%';
+                progressInfo.textContent = `${statusData.current || 0} / ${statusData.target || 0} tweets`;
+            }
+            
+            // Get tweets
+            const tweetsResponse = await fetch(`/tweets/${jobId}`);
+            const tweetsData = await tweetsResponse.json();
+            
+            if (tweetsData.tweets) {
+                updateTweetsTable(tweetsData.tweets);
+            }
+            
+            // Check if completed
+            if (statusData.status === 'completed') {
                 clearInterval(interval);
-                showResult(`✅ Scraping completed!<br><strong>File saved:</strong> ${data.filename}`, false);
+                showResult(`✅ Scraping completed!<br><strong>File saved:</strong> ${statusData.filename}<br><strong>Total tweets:</strong> ${tweetsData.count}`, false);
                 resetButton();
-            } else if (data.status === 'failed') {
+            } else if (statusData.status === 'failed') {
                 clearInterval(interval);
-                showResult(`❌ Scraping failed: ${data.error}`, true);
+                showResult(`❌ Scraping failed: ${statusData.error}`, true);
                 resetButton();
-            } else {
-                document.getElementById('statusText').textContent = 'Scraping in progress... Please wait.';
             }
         } catch (error) {
             clearInterval(interval);
             showResult('Error checking status: ' + error.message, true);
             resetButton();
         }
-    }, 3000); // Check every 3 seconds
+    }, 2000); // Check every 2 seconds
+}
+
+function updateTweetsTable(tweets) {
+    const tbody = document.getElementById('tweetsBody');
+    tbody.innerHTML = ''; // Clear existing rows
+    
+    tweets.forEach(tweet => {
+        const row = document.createElement('tr');
+        row.innerHTML = `
+            <td>${tweet.tweet_id || ''}</td>
+            <td>@${tweet.username || ''}</td>
+            <td>${tweet.display_name || ''}</td>
+            <td class="tweet-text" title="${tweet.text || ''}">${tweet.text || ''}</td>
+            <td>${formatTimestamp(tweet.timestamp)}</td>
+            <td>${tweet.likes || '0'}</td>
+            <td>${tweet.retweets || '0'}</td>
+            <td>${tweet.replies || '0'}</td>
+            <td>${tweet.hashtags || ''}</td>
+            <td>${tweet.mentions || ''}</td>
+            <td>${tweet.tweet_type || 'original'}</td>
+            <td><a href="${tweet.tweet_url || '#'}" target="_blank" class="tweet-link">View</a></td>
+        `;
+        tbody.appendChild(row);
+    });
+}
+
+function formatTimestamp(timestamp) {
+    if (!timestamp) return '';
+    const date = new Date(timestamp);
+    return date.toLocaleString();
 }
 
 function showResult(message, isError) {
