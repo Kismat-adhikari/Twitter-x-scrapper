@@ -1,78 +1,39 @@
-"""
-Test script to verify exact tweet count delivery with speed optimizations
-"""
-import time
-from scraper.playwright_scraper import TwitterScraper
+#!/usr/bin/env python3
+"""Test exact tweet count"""
 
-def test_exact_count():
-    print("🧪 TESTING EXACT COUNT DELIVERY WITH SPEED OPTIMIZATIONS")
-    print("=" * 60)
+from scraper.playwright_scraper import TwitterScraper
+from datetime import datetime
+import csv
+
+target = 20
+print(f"Testing exact count: Target = {target} tweets")
+print("=" * 60)
+
+scraper = TwitterScraper(num_tabs=2)
+result = scraper.scrape(
+    keyword='AI',
+    num_tweets=target,
+    job_id=f'exact_count_{datetime.now().strftime("%H%M%S")}',
+    search_mode='top'
+)
+
+if result:
+    csv_path = f"scraped_data/{result}"
     
-    # Test with 50 tweets (what user requested)
-    target_tweets = 50
-    search_query = "AI OR technology OR python"  # Broad search for good results
-    
-    print(f"🎯 Target: {target_tweets} tweets")
-    print(f"🔍 Search: {search_query}")
-    print(f"⏰ Starting at: {time.strftime('%H:%M:%S')}")
-    print("-" * 40)
-    
-    start_time = time.time()
-    
-    # Initialize scraper with 8 parallel tabs
-    scraper = TwitterScraper(num_tabs=8)
-    
-    # Run scraping
-    result_file = scraper.scrape(
-        keyword=search_query,
-        num_tweets=target_tweets,
-        job_id="exact_count_test"
-    )
-    
-    end_time = time.time()
-    duration = end_time - start_time
+    with open(csv_path, 'r', encoding='utf-8-sig') as f:
+        reader = csv.DictReader(f)
+        actual = sum(1 for _ in reader)
     
     print("\n" + "=" * 60)
-    print("📊 RESULTS:")
-    print(f"⏱️  Duration: {duration:.1f} seconds")
-    print(f"📁 Output file: {result_file}")
+    print(f"Target: {target} tweets")
+    print(f"Actual: {actual} tweets")
+    print(f"Difference: {actual - target}")
     
-    if result_file:
-        # Count actual tweets in CSV
-        import csv
-        try:
-            with open(result_file, 'r', encoding='utf-8') as f:
-                reader = csv.reader(f)
-                next(reader)  # Skip header
-                actual_count = sum(1 for row in reader)
-            
-            print(f"🎯 Target tweets: {target_tweets}")
-            print(f"✅ Actual tweets: {actual_count}")
-            
-            accuracy = (actual_count / target_tweets) * 100
-            print(f"📈 Accuracy: {accuracy:.1f}%")
-            
-            tweets_per_second = actual_count / duration
-            print(f"⚡ Speed: {tweets_per_second:.1f} tweets/second")
-            
-            if actual_count >= target_tweets * 0.9:  # 90% or better
-                print("🏆 SUCCESS: Excellent accuracy!")
-            elif actual_count >= target_tweets * 0.8:  # 80% or better
-                print("✅ GOOD: Good accuracy!")
-            else:
-                print("⚠️  ATTENTION: Lower than expected count")
-            
-            if duration < 60:  # Under 1 minute
-                print("🚀 SPEED: Excellent performance!")
-            elif duration < 120:  # Under 2 minutes
-                print("⚡ SPEED: Good performance!")
-            else:
-                print("⏳ SPEED: Could be faster")
-                
-        except Exception as e:
-            print(f"❌ Error reading results: {e}")
+    if actual == target:
+        print("\nSUCCESS: Exact count!")
+    elif actual <= target + 2:
+        print("\nACCEPTABLE: Within 2 tweets of target")
     else:
-        print("❌ No results file generated")
-
-if __name__ == "__main__":
-    test_exact_count()
+        print(f"\nFAILED: {actual - target} extra tweets")
+else:
+    print("FAILED: No tweets collected")

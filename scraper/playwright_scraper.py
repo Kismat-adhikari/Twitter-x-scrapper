@@ -45,17 +45,18 @@ class TwitterScraper:
         # Initialize CSV handler
         self.csv_handler = FastCSVHandler(job_id) if num_tweets >= 50 else CSVHandler(job_id)
         self.job_id = job_id
+        self.target_tweets = num_tweets  # Store target for exact count checking
         
-        # Balanced tab count for speed + stability
+        # Optimized tab count for maximum speed
         if self.num_tabs is None:
             if num_tweets >= 200:
-                self.num_tabs = 6  # High for very large targets
+                self.num_tabs = 8  # Maximum for very large targets
             elif num_tweets >= 100:
-                self.num_tabs = 5  # Medium-high for large targets
+                self.num_tabs = 6  # High for large targets
             elif num_tweets >= 50:
-                self.num_tabs = 4  # Standard for medium targets
+                self.num_tabs = 5  # Medium-high for medium targets
             else:
-                self.num_tabs = 3  # Conservative for small targets
+                self.num_tabs = 4  # Faster for small targets
         
         print(f"STARTING SCRAPE: {self.num_tabs} parallel tabs")
         print(f"Target: {num_tweets} tweets")
@@ -118,12 +119,18 @@ class TwitterScraper:
                     if isinstance(instruction, dict):
                         entries = instruction.get('entries', [])
                         for entry in entries:
+                            # Stop processing if we've reached target
+                            if self.target_reached or self.csv_handler.get_tweet_count() >= self.target_tweets:
+                                return
                             self._process_api_entry(entry, tab_id)
             
             # Also check for direct tweet data
             tweets = self._find_in_dict(data, 'tweets')
             if tweets and isinstance(tweets, dict):
                 for tweet_id, tweet_data in tweets.items():
+                    # Stop processing if we've reached target
+                    if self.target_reached or self.csv_handler.get_tweet_count() >= self.target_tweets:
+                        return
                     self._process_api_tweet(tweet_data, tab_id, None)
         except Exception as e:
             pass
@@ -186,6 +193,34 @@ class TwitterScraper:
             quotes = legacy.get('quote_count', 0)
             bookmarks = legacy.get('bookmark_count', 0)
             
+            # Extract views (sometimes in tweet_data.views, sometimes in legacy)
+            views = 0
+            if 'views' in tweet_data:
+                views_data = tweet_data.get('views', {})
+                if isinstance(views_data, dict):
+                    view_count = views_data.get('count', 0)
+                    # Convert to int if it's a string
+                    if isinstance(view_count, str):
+                        try:
+                            views = int(view_count)
+                        except:
+                            views = 0
+                    else:
+                        views = view_count
+                elif isinstance(views_data, (int, str)):
+                    try:
+                        views = int(views_data)
+                    except:
+                        views = 0
+            
+            # Calculate engagement rate (total engagement / views * 100)
+            # If no views, calculate based on followers (but we don't have that, so use total engagement)
+            total_engagement = likes + retweets + replies + quotes + bookmarks
+            if views > 0:
+                engagement_rate = round((total_engagement / views) * 100, 2)
+            else:
+                engagement_rate = 0
+            
             # FILTER: Only include tweets with engagement > 0
             if likes == 0 and retweets == 0 and replies == 0:
                 return
@@ -194,6 +229,12 @@ class TwitterScraper:
             username = None
             display_name = None
             verified = False
+            profile_bio = ''
+            profile_location = ''
+            profile_website = ''
+            profile_email = ''
+            followers_count = 0
+            following_count = 0
             
             # Method 1: Try core.user_results.result.core (CORRECT location for screen_name!)
             try:
@@ -214,6 +255,50 @@ class TwitterScraper:
                             verified = user_result.get('is_blue_verified', False)
                             if not verified and user_legacy:
                                 verified = user_legacy.get('verified', False)
+                            
+                            # Extract profile information from user_legacy
+                            profile_bio = ''
+                            profile_location = ''
+                            profile_website = ''
+                            profile_email = ''
+                            followers_count = 0
+                            following_count = 0
+                            
+                            if user_legacy:
+                                # Bio/Description
+                                profile_bio = user_legacy.get('description', '')
+                                
+                                # Location
+                                profile_location = user_legacy.get('location', '')
+                                
+                                # Followers and Following
+                                followers_count = user_legacy.get('followers_count', 0)
+                                following_count = user_legacy.get('friends_count', 0)
+                                
+                                # Website/URL - check entities for expanded URL
+                                url_entities = user_legacy.get('entities', {}).get('url', {}).get('urls', [])
+                                if url_entities and len(url_entities) > 0:
+                                    # Get the expanded URL (actual website)
+                                    profile_website = url_entities[0].get('expanded_url', '')
+                                    if not profile_website:
+                                        profile_website = url_entities[0].get('url', '')
+                                
+                                # Try to extract email from bio (if present)
+                                if profile_bio:
+                                    import re
+                                    email_pattern = r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b'
+                                    email_matches = re.findall(email_pattern, profile_bio)
+                                    if email_matches:
+                                        profile_email = email_matches[0]
+                                
+                                # Also check description entities for URLs
+                                desc_entities = user_legacy.get('entities', {}).get('description', {}).get('urls', [])
+                                if desc_entities and not profile_website:
+                                    for url_entity in desc_entities:
+                                        expanded = url_entity.get('expanded_url', '')
+                                        if expanded:
+                                            profile_website = expanded
+                                            break
             except Exception as e:
                 pass
             
@@ -306,22 +391,37 @@ class TwitterScraper:
                 'replies': str(replies),  # REAL engagement!
                 'quotes': str(quotes),  # REAL engagement!
                 'bookmarks': str(bookmarks),  # REAL engagement!
-                'views': '',  # Views not always available in API
-                'engagement_rate': '',
+                'views': str(views) if views > 0 else '',  # REAL views!
+                'engagement_rate': f'{engagement_rate}%' if engagement_rate > 0 else '',
                 'hashtags': hashtags,
                 'mentions': mentions,
                 'media_urls': media_urls,
                 'is_original': 'true',
                 'tweet_link': f'https://x.com/{username}/status/{tweet_id}',
-                'profile_link': f'https://x.com/{username}'
+                'profile_link': f'https://x.com/{username}',
+                'profile_bio': profile_bio.replace('\n', ' ').replace('"', '""') if profile_bio else '',
+                'profile_location': profile_location,
+                'profile_website': profile_website,
+                'profile_email': profile_email,
+                'followers_count': str(followers_count),
+                'following_count': str(following_count)
             }
             
             # Add to CSV if unique and has engagement
+            # Check if we've already reached the target before adding
+            current_count = self.csv_handler.get_tweet_count()
+            if current_count >= self.target_tweets:
+                return  # Stop processing more tweets
+            
             if self.csv_handler and self.csv_handler.add_tweet(tweet):
                 with self.lock:
                     self.total_scraped += 1
                 current_count = self.csv_handler.get_tweet_count()
                 print(f"Tab {tab_id}: API tweet - {username}: {likes} likes, {retweets} RTs, {replies} replies (Total: {current_count})")
+                
+                # Check again after adding
+                if current_count >= self.target_tweets:
+                    self.target_reached = True
         
         except Exception as e:
             pass
@@ -338,7 +438,22 @@ class TwitterScraper:
                     args=['--no-sandbox', '--disable-dev-shm-usage']
                 )
                 
-                context = browser.new_context()
+                # Get a proxy for this tab (round-robin rotation)
+                # Proxies enabled for better rate limiting and avoiding blocks
+                use_proxies = True  # Enabled to avoid getting blocked
+                
+                if use_proxies:
+                    proxy = self.proxy_manager.get_next_proxy()
+                    if proxy:
+                        context = browser.new_context(proxy=proxy)
+                        print(f"Tab {tab_id}: Using proxy {proxy.get('server', 'unknown')}")
+                    else:
+                        context = browser.new_context()
+                        print(f"Tab {tab_id}: No proxy available, using direct connection")
+                else:
+                    context = browser.new_context()
+                    print(f"Tab {tab_id}: Using direct connection (proxies disabled)")
+                
                 if self.cookies:
                     context.add_cookies(self.cookies)
                 
@@ -350,12 +465,20 @@ class TwitterScraper:
                 
                 # Navigate to URL
                 print(f"Tab {tab_id}: Navigating to search page...")
-                page.goto(search_url, timeout=30000)
-                time.sleep(random.uniform(1, 2))  # Faster initial wait
+                try:
+                    response = page.goto(search_url, timeout=30000, wait_until='domcontentloaded')
+                    print(f"Tab {tab_id}: Response status: {response.status if response else 'None'}")
+                except Exception as e:
+                    print(f"Tab {tab_id}: Navigation failed: {e}")
+                    return
+                
+                time.sleep(random.uniform(2, 3))  # Give more time to load
                 
                 # Debug: Check what we loaded
                 title = page.title()
-                print(f"Tab {tab_id}: Page title: {title}")
+                current_url = page.url
+                print(f"Tab {tab_id}: Page title: '{title}'")
+                print(f"Tab {tab_id}: Current URL: {current_url}")
                 
                 # Check if we're on the right page
                 if title == "X" or "login" in title.lower() or "sign" in title.lower():
@@ -366,7 +489,7 @@ class TwitterScraper:
                     
                     # Now try search again
                     page.goto(search_url, timeout=30000)
-                    time.sleep(random.uniform(1, 2))
+                    time.sleep(random.uniform(0.5, 1.0))
                     
                     new_title = page.title()
                     print(f"Tab {tab_id}: After retry, page title: {new_title}")
@@ -376,12 +499,12 @@ class TwitterScraper:
                         print(f"Tab {tab_id}: Still blocked, skipping this tab")
                         return
                 
-                # Try to close any popups
+                # Try to close any popups (faster)
                 try:
                     close_btn = page.query_selector('[aria-label=\"Close\"]')
                     if close_btn:
                         close_btn.click()
-                        time.sleep(1)
+                        time.sleep(0.3)
                 except:
                     pass
                 
@@ -438,43 +561,43 @@ class TwitterScraper:
                     progress_ratio = current_total / num_tweets
                     
                     if num_tweets >= 200:
-                        # For very large targets (200+), be reasonably persistent
+                        # For very large targets (200+), very persistent
                         if progress_ratio < 0.3:
-                            max_no_content = 10  # Persistent early on
+                            max_no_content = 15   # Very persistent early on
                         elif progress_ratio < 0.7:
-                            max_no_content = 8   # Medium mid-way
+                            max_no_content = 12   # Persistent mid-way
                         else:
-                            max_no_content = 6   # Faster near end
+                            max_no_content = 8    # Still persistent near end
                     elif num_tweets >= 100:
-                        # For large targets (100-199), balanced persistence
+                        # For large targets (100-199), persistent
                         if progress_ratio < 0.5:
-                            max_no_content = 8   # Persistent early on
+                            max_no_content = 12   # Very persistent early on
                         elif progress_ratio < 0.8:
-                            max_no_content = 6   # Medium mid-way
+                            max_no_content = 10   # Persistent mid-way
                         else:
-                            max_no_content = 5   # Faster near end
+                            max_no_content = 8    # Still trying near end
                     else:
-                        max_no_content = 6
+                        max_no_content = 8  # Persistent for small batches too
                     
                     if no_content_count >= max_no_content:
                         print(f"Tab {tab_id}: No new content for {max_no_content} attempts (progress: {progress_ratio:.1%}), stopping")
                         break
                     
-                    # Aggressive scrolling for maximum speed
-                    scroll_multiplier = 6 if num_tweets >= 200 else (5 if num_tweets >= 100 else 4)
+                    # Ultra-aggressive scrolling for maximum speed
+                    scroll_multiplier = 8 if num_tweets >= 200 else (7 if num_tweets >= 100 else 6)
                     page.evaluate(f'window.scrollBy(0, window.innerHeight * {scroll_multiplier})')
                     
-                    # Balanced fast wait times for speed + stability
+                    # Optimized wait times for maximum speed
                     if no_content_count >= 5:
-                        sleep_time = random.uniform(2.0, 3.0)  # Reasonable wait when struggling
+                        sleep_time = random.uniform(1.0, 1.5)  # Moderate wait when struggling
                     elif no_content_count >= 3:
-                        sleep_time = random.uniform(1.5, 2.0)  # Medium wait when struggling  
+                        sleep_time = random.uniform(0.8, 1.2)  # Short wait when struggling  
                     elif num_tweets >= 200:
-                        sleep_time = random.uniform(1.0, 1.5)  # Fast for very large targets
+                        sleep_time = random.uniform(0.5, 0.8)  # Very fast for large targets
                     elif num_tweets >= 100:
-                        sleep_time = random.uniform(0.8, 1.2)  # Fast for large targets
+                        sleep_time = random.uniform(0.4, 0.7)  # Very fast for large targets
                     else:
-                        sleep_time = random.uniform(0.6, 1.0)  # Fast for small targets
+                        sleep_time = random.uniform(0.3, 0.6)  # Ultra fast for small targets
                     
                     time.sleep(sleep_time)
                 
@@ -489,8 +612,8 @@ class TwitterScraper:
         tweets = []
         
         try:
-            # Moderate content loading
-            time.sleep(0.3)
+            # Minimal content loading wait (optimized for speed)
+            time.sleep(0.1)
             
             # Look for tweet articles with multiple strategies
             articles = page.query_selector_all('article')
@@ -757,7 +880,13 @@ class TwitterScraper:
                         'media_urls': '',
                         'is_original': 'true',
                         'tweet_link': f'https://x.com/{username}/status/{tweet_id}',
-                        'profile_link': f'https://x.com/{username}'
+                        'profile_link': f'https://x.com/{username}',
+                        'profile_bio': '',
+                        'profile_location': '',
+                        'profile_website': '',
+                        'profile_email': '',
+                        'followers_count': '0',
+                        'following_count': '0'
                     }
                     
                     tweets.append(tweet)
@@ -806,8 +935,8 @@ class TwitterScraper:
             # Add engagement filters to the query for better results
             # These filters help ensure tweets have actual engagement
             if search_mode == 'top':
-                # Add minimum engagement filter (at least 10 likes)
-                combined_query += ' min_faves:10'
+                # Add minimum engagement filter (at least 1 like for more results)
+                combined_query += ' min_faves:1'
             elif search_mode == 'people':
                 # Filter for verified accounts only
                 combined_query += ' filter:verified'
@@ -840,7 +969,7 @@ class TwitterScraper:
                 
                 # Re-add engagement filter after simplification
                 if search_mode == 'top':
-                    combined_query += ' min_faves:10'
+                    combined_query += ' min_faves:1'
                 elif search_mode == 'people':
                     combined_query += ' filter:verified'
                 

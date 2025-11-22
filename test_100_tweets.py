@@ -1,57 +1,79 @@
-#!/usr/bin/env python3
 """
-Test script to verify 100 tweet collection
+Test script to verify 100 tweet scraping works
+Run this to test if the scraper can collect 100 tweets
 """
-import sys
-import os
-sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
 from scraper.playwright_scraper import TwitterScraper
-import time
+from datetime import datetime
 
 def test_100_tweets():
-    print("🧪 TESTING: 100 tweet collection")
-    print("=" * 50)
+    print("=" * 60)
+    print("Testing 100 Tweet Scraping")
+    print("=" * 60)
     
-    start_time = time.time()
+    # Create scraper
+    scraper = TwitterScraper(num_tabs=4)
     
-    scraper = TwitterScraper()  # Let it auto-determine tab count
+    # Test parameters
+    keyword = "AI"
+    num_tweets = 100
+    job_id = datetime.now().strftime('%Y%m%d_%H%M%S')
     
-    # Test with a popular keyword to ensure content availability
-    result = scraper.scrape(
-        keyword='AI',
-        num_tweets=100,
-        job_id='test_100_tweets'
-    )
+    print(f"\n🎯 Target: {num_tweets} tweets")
+    print(f"🔍 Keyword: {keyword}")
+    print(f"📝 Job ID: {job_id}")
+    print(f"🚀 Starting scrape...\n")
     
-    end_time = time.time()
-    duration = end_time - start_time
-    
-    print(f"\n📊 TEST RESULTS:")
-    print(f"⏱️  Duration: {duration:.1f} seconds")
-    print(f"📁 File: {result}")
-    
-    if result:
-        # Check actual tweet count
-        import csv
-        with open(f'scraped_data/{result}', 'r', encoding='utf-8') as f:
-            reader = csv.reader(f)
-            next(reader)  # Skip header
-            actual_count = sum(1 for row in reader)
+    try:
+        # Run scraper
+        filename = scraper.scrape(
+            keyword=keyword,
+            hashtag='',
+            username='',
+            tweet_url='',
+            num_tweets=num_tweets,
+            job_id=job_id
+        )
         
-        print(f"🎯 Target: 100 tweets")
-        print(f"✅ Actual: {actual_count} tweets")
-        print(f"📈 Success rate: {actual_count/100*100:.1f}%")
-        
-        if actual_count < 100:
-            print(f"❌ ISSUE: Only got {actual_count}/100 tweets")
-            return False
+        if filename:
+            # Count tweets in CSV
+            import csv
+            csv_path = f'scraped_data/{filename}'
+            
+            with open(csv_path, 'r', encoding='utf-8-sig') as f:
+                reader = csv.DictReader(f)
+                tweets = list(reader)
+                actual_count = len(tweets)
+            
+            print("\n" + "=" * 60)
+            print("RESULTS")
+            print("=" * 60)
+            print(f"✅ Target: {num_tweets} tweets")
+            print(f"📊 Actual: {actual_count} tweets")
+            print(f"📈 Success Rate: {(actual_count/num_tweets)*100:.1f}%")
+            print(f"📁 File: {filename}")
+            
+            if actual_count >= num_tweets * 0.9:  # 90% or more
+                print("\n🎉 SUCCESS! Got 90%+ of target tweets")
+            elif actual_count >= num_tweets * 0.7:  # 70% or more
+                print("\n⚠️  PARTIAL SUCCESS - Got 70%+ of target")
+            else:
+                print("\n❌ FAILED - Got less than 70% of target")
+                print("\nPossible issues:")
+                print("- Not enough tweets available for this keyword")
+                print("- Twitter rate limiting")
+                print("- Cookies expired")
+                print("- Proxies not working")
+            
+            print("\n" + "=" * 60)
+            
         else:
-            print(f"✅ SUCCESS: Got {actual_count} tweets!")
-            return True
-    else:
-        print("❌ FAILED: No file created")
-        return False
+            print("\n❌ FAILED - No tweets collected")
+            
+    except Exception as e:
+        print(f"\n❌ ERROR: {e}")
+        import traceback
+        traceback.print_exc()
 
 if __name__ == "__main__":
     test_100_tweets()

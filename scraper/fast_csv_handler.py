@@ -31,7 +31,9 @@ class FastCSVHandler:
             'text', 'timestamp', 'language', 'tweet_type',
             'likes', 'retweets', 'replies', 'quotes', 'bookmarks', 'views', 'engagement_rate',
             'hashtags', 'mentions', 'media_urls', 'is_original',
-            'tweet_link', 'profile_link'
+            'tweet_link', 'profile_link',
+            'profile_bio', 'profile_location', 'profile_website', 'profile_email',
+            'followers_count', 'following_count'
         ]
         
         with open(self.tweets_file, 'w', newline='', encoding='utf-8-sig') as f:
@@ -72,7 +74,9 @@ class FastCSVHandler:
                 'text', 'timestamp', 'language', 'tweet_type',
                 'likes', 'retweets', 'replies', 'quotes', 'bookmarks', 'views', 'engagement_rate',
                 'hashtags', 'mentions', 'media_urls', 'is_original',
-                'tweet_link', 'profile_link'
+                'tweet_link', 'profile_link',
+                'profile_bio', 'profile_location', 'profile_website', 'profile_email',
+                'followers_count', 'following_count'
             ]
             
             with open(self.tweets_file, 'a', newline='', encoding='utf-8-sig') as f:

@@ -32,26 +32,9 @@ def get_user_input():
         print("❌ Error: You must provide at least one search parameter!")
         return None
     
-    # Get search mode for engagement filtering
-    print("\n📊 Search Mode (affects engagement levels):")
-    print("  1. TOP - Popular tweets with high engagement (recommended)")
-    print("  2. LIVE - Latest tweets (may have low/zero engagement)")
-    print("  3. PEOPLE - From verified accounts (usually higher engagement)")
-    
-    while True:
-        mode_choice = input("Select mode (1/2/3) [default: 1]: ").strip()
-        if mode_choice == '' or mode_choice == '1':
-            search_mode = 'top'
-            break
-        elif mode_choice == '2':
-            search_mode = 'live'
-            print("⚠️  Warning: LIVE mode may return tweets with zero engagement")
-            break
-        elif mode_choice == '3':
-            search_mode = 'people'
-            break
-        else:
-            print("❌ Please enter 1, 2, or 3")
+    # Always use TOP mode (prioritizes high engagement tweets)
+    search_mode = 'top'
+    print("\n📊 Mode: TOP (Popular tweets with high engagement)")
     
     # Get number of tweets
     while True:
@@ -101,13 +84,8 @@ def display_search_info(params):
     for term in search_terms:
         print(f"  🔍 {term}")
     
-    # Display search mode
-    mode_display = {
-        'top': '📊 TOP (Popular/High Engagement)',
-        'live': '🔴 LIVE (Latest/Chronological)',
-        'people': '✓ PEOPLE (Verified Accounts)'
-    }
-    print(f"  {mode_display.get(params.get('search_mode', 'top'), '📊 TOP')}")
+    # Display search mode (always TOP)
+    print(f"  📊 Mode: TOP (Popular/High Engagement)")
     
     print(f"  🎯 Target: {params['num_tweets']} tweets")
     
