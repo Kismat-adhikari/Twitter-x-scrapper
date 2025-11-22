@@ -29,9 +29,9 @@ class FastCSVHandler:
         fieldnames = [
             'tweet_id', 'tweet_url', 'username', 'display_name', 'verified',
             'text', 'timestamp', 'language', 'tweet_type',
-            'likes', 'retweets', 'replies', 'engagement_rate',
+            'likes', 'retweets', 'replies', 'quotes', 'bookmarks', 'views', 'engagement_rate',
             'hashtags', 'mentions', 'media_urls', 'is_original',
-            'tweet_link', 'profile_link'  # Add missing fields
+            'tweet_link', 'profile_link'
         ]
         
         with open(self.tweets_file, 'w', newline='', encoding='utf-8-sig') as f:
@@ -70,9 +70,9 @@ class FastCSVHandler:
             fieldnames = [
                 'tweet_id', 'tweet_url', 'username', 'display_name', 'verified',
                 'text', 'timestamp', 'language', 'tweet_type',
-                'likes', 'retweets', 'replies', 'engagement_rate',
+                'likes', 'retweets', 'replies', 'quotes', 'bookmarks', 'views', 'engagement_rate',
                 'hashtags', 'mentions', 'media_urls', 'is_original',
-                'tweet_link', 'profile_link'  # Add missing fields
+                'tweet_link', 'profile_link'
             ]
             
             with open(self.tweets_file, 'a', newline='', encoding='utf-8-sig') as f:

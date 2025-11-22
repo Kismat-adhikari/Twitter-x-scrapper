@@ -1,0 +1,28 @@
+﻿Running debug scrape to see API structure...
+============================================================
+Loaded 10 proxies
+Loaded 13 cookies
+python : Traceback (most recent call last):
+At line:1 char:1
++ python debug_username.py 2>&1 | Out-File -FilePath debug_output.txt - ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (Traceback (most recent call last)::String) [], 
+    RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+  File "C:\Users\kisma\Desktop\X scraper\debug_username.py", line 12, in <module>
+    result = scraper.scrape(
+             ^^^^^^^^^^^^^^^
+  File "C:\Users\kisma\Desktop\X scraper\scraper\playwright_scraper.py", line 46, in scrape
+    self.csv_handler = FastCSVHandler(job_id) if num_tweets >= 50 else CSVHandler(job_id)
+                                                                       ^^^^^^^^^^^^^^^^^^
+  File "C:\Users\kisma\Desktop\X scraper\scraper\csv_handler.py", line 15, in __init__
+    self._initialize_csv()
+  File "C:\Users\kisma\Desktop\X scraper\scraper\csv_handler.py", line 31, in 
+_initialize_csv
+    print(f"\U0001f4dd Created CSV file: {self.tweets_file}")
+  File "C:\Program Files\Python312\Lib\encodings\cp1252.py", line 19, in encode
+    return codecs.charmap_encode(input,self.errors,encoding_table)[0]
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+UnicodeEncodeError: 'charmap' codec can't encode character '\U0001f4dd' in position 0: 
+character maps to <undefined>

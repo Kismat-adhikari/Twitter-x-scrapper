@@ -32,10 +32,31 @@ def get_user_input():
         print("❌ Error: You must provide at least one search parameter!")
         return None
     
+    # Get search mode for engagement filtering
+    print("\n📊 Search Mode (affects engagement levels):")
+    print("  1. TOP - Popular tweets with high engagement (recommended)")
+    print("  2. LIVE - Latest tweets (may have low/zero engagement)")
+    print("  3. PEOPLE - From verified accounts (usually higher engagement)")
+    
+    while True:
+        mode_choice = input("Select mode (1/2/3) [default: 1]: ").strip()
+        if mode_choice == '' or mode_choice == '1':
+            search_mode = 'top'
+            break
+        elif mode_choice == '2':
+            search_mode = 'live'
+            print("⚠️  Warning: LIVE mode may return tweets with zero engagement")
+            break
+        elif mode_choice == '3':
+            search_mode = 'people'
+            break
+        else:
+            print("❌ Please enter 1, 2, or 3")
+    
     # Get number of tweets
     while True:
         try:
-            num_tweets = int(input("Enter number of tweets to scrape (10-500): ").strip())
+            num_tweets = int(input("\nEnter number of tweets to scrape (10-500): ").strip())
             if 10 <= num_tweets <= 500:
                 break
             else:
@@ -47,7 +68,8 @@ def get_user_input():
         'keyword': keyword if keyword else '',
         'hashtag': hashtag if hashtag else '',
         'username': username if username else '',
-        'num_tweets': num_tweets
+        'num_tweets': num_tweets,
+        'search_mode': search_mode
     }
 
 def display_search_info(params):
@@ -78,6 +100,14 @@ def display_search_info(params):
     
     for term in search_terms:
         print(f"  🔍 {term}")
+    
+    # Display search mode
+    mode_display = {
+        'top': '📊 TOP (Popular/High Engagement)',
+        'live': '🔴 LIVE (Latest/Chronological)',
+        'people': '✓ PEOPLE (Verified Accounts)'
+    }
+    print(f"  {mode_display.get(params.get('search_mode', 'top'), '📊 TOP')}")
     
     print(f"  🎯 Target: {params['num_tweets']} tweets")
     
@@ -121,7 +151,8 @@ def main():
             hashtag=params['hashtag'],
             username=params['username'],
             num_tweets=params['num_tweets'],
-            job_id=job_id
+            job_id=job_id,
+            search_mode=params.get('search_mode', 'top')
         )
         
         if result_filename:

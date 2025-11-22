@@ -22,13 +22,13 @@ class CSVHandler:
             writer = csv.DictWriter(f, fieldnames=[
                 'tweet_id', 'tweet_url', 'username', 'display_name', 'verified',
                 'text', 'timestamp', 'language', 'tweet_type',
-                'likes', 'retweets', 'replies', 'engagement_rate',
+                'likes', 'retweets', 'replies', 'quotes', 'bookmarks', 'views', 'engagement_rate',
                 'hashtags', 'mentions', 'media_urls', 'is_original',
                 'tweet_link', 'profile_link'
             ], quoting=csv.QUOTE_ALL)
             writer.writeheader()
         
-        print(f"📝 Created CSV file: {self.tweets_file}")
+        print(f"Created CSV file: {self.tweets_file}")
     
     def add_tweet(self, tweet_data):
         """Alias for append_tweet for compatibility"""
@@ -51,7 +51,7 @@ class CSVHandler:
                     writer = csv.DictWriter(f, fieldnames=[
                         'tweet_id', 'tweet_url', 'username', 'display_name', 'verified',
                         'text', 'timestamp', 'language', 'tweet_type',
-                        'likes', 'retweets', 'replies', 'engagement_rate',
+                        'likes', 'retweets', 'replies', 'quotes', 'bookmarks', 'views', 'engagement_rate',
                         'hashtags', 'mentions', 'media_urls', 'is_original',
                         'tweet_link', 'profile_link'
                     ], quoting=csv.QUOTE_ALL)
