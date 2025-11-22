@@ -23,11 +23,16 @@ class CSVHandler:
                 'tweet_id', 'tweet_url', 'username', 'display_name', 'verified',
                 'text', 'timestamp', 'language', 'tweet_type',
                 'likes', 'retweets', 'replies', 'engagement_rate',
-                'hashtags', 'mentions', 'media_urls', 'is_original'
-            ])
+                'hashtags', 'mentions', 'media_urls', 'is_original',
+                'tweet_link', 'profile_link'
+            ], quoting=csv.QUOTE_ALL)
             writer.writeheader()
         
         print(f"📝 Created CSV file: {self.tweets_file}")
+    
+    def add_tweet(self, tweet_data):
+        """Alias for append_tweet for compatibility"""
+        return self.append_tweet(tweet_data)
     
     def append_tweet(self, tweet_data):
         """Append a single tweet to CSV (thread-safe)"""
@@ -47,8 +52,9 @@ class CSVHandler:
                         'tweet_id', 'tweet_url', 'username', 'display_name', 'verified',
                         'text', 'timestamp', 'language', 'tweet_type',
                         'likes', 'retweets', 'replies', 'engagement_rate',
-                        'hashtags', 'mentions', 'media_urls', 'is_original'
-                    ])
+                        'hashtags', 'mentions', 'media_urls', 'is_original',
+                        'tweet_link', 'profile_link'
+                    ], quoting=csv.QUOTE_ALL)
                     writer.writerow(tweet_data)
                 
                 self.tweet_count += 1
@@ -78,6 +84,20 @@ class CSVHandler:
                 writer.writeheader()
                 writer.writerow(user_data)
             
-            print(f"✅ User profile saved to: {user_file}")
+            print(f"👤 User profile saved to: {user_file}")
         except Exception as e:
             print(f"❌ Error saving user profile: {e}")
+    
+    def get_tweet_count(self):
+        """Get current number of tweets in CSV"""
+        try:
+            with open(self.tweets_file, 'r', encoding='utf-8-sig') as f:
+                reader = csv.reader(f)
+                next(reader)  # Skip header
+                return sum(1 for row in reader)
+        except:
+            return 0
+    
+    def get_filename(self):
+        """Get the CSV filename"""
+        return f'twitter_scrape_{self.timestamp}.csv'

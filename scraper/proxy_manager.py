@@ -20,6 +20,10 @@ class ProxyManager:
         except FileNotFoundError:
             print(f"Warning: {proxy_file} not found. Running without proxies.")
     
+    def get_next_proxy(self) -> Optional[dict]:
+        """Alias for get_proxy for compatibility"""
+        return self.get_proxy()
+    
     def get_proxy(self) -> Optional[dict]:
         """Get next available proxy in round-robin fashion"""
         if not self.proxies:
