@@ -28,6 +28,15 @@ class TwitterScraper:
         self.api_tweets = []  # Store tweets from API interception
         self.use_api_extraction = True  # Enable API-based extraction
         self.api_users = {}  # Cache users from API responses
+        
+        # User agent pool for better stealth
+        self.user_agents = [
+            'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36',
+            'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
+            'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36'
+        ]
 
     def scrape(self, keyword='', hashtag='', username='', tweet_url='', tweet_urls=None, num_tweets=100, job_id='', search_mode='top'):
         """Main scraping method with robust error handling
@@ -432,47 +441,91 @@ class TwitterScraper:
         
         try:
             with sync_playwright() as p:
-                # Launch browser with minimal flags
-                browser = p.chromium.launch(
-                    headless=True,
-                    args=['--no-sandbox', '--disable-dev-shm-usage']
-                )
-                
-                # Get a proxy for this tab (round-robin rotation)
+                # Get a random proxy for this tab for better distribution
                 # Proxies enabled for better rate limiting and avoiding blocks
                 use_proxies = True  # Enabled to avoid getting blocked
                 
+                proxy = None
                 if use_proxies:
-                    proxy = self.proxy_manager.get_next_proxy()
+                    # Use random proxy selection for better distribution
+                    proxy = self.proxy_manager.get_random_proxy()
                     if proxy:
-                        context = browser.new_context(proxy=proxy)
                         print(f"Tab {tab_id}: Using proxy {proxy.get('server', 'unknown')}")
                     else:
-                        context = browser.new_context()
                         print(f"Tab {tab_id}: No proxy available, using direct connection")
-                else:
-                    context = browser.new_context()
-                    print(f"Tab {tab_id}: Using direct connection (proxies disabled)")
+                
+                # Launch browser with global proxy setting (required by Playwright)
+                # If proxy is None, Playwright will use direct connection
+                browser_args = [
+                    '--no-sandbox', 
+                    '--disable-dev-shm-usage',
+                    '--disable-blink-features=AutomationControlled',
+                    '--disable-web-security',
+                    '--disable-features=VizDisplayCompositor'
+                ]
+                
+                browser = p.chromium.launch(
+                    headless=True,
+                    args=browser_args,
+                    proxy=proxy if proxy else None
+                )
+                
+                # Create context with better stealth settings
+                user_agent = random.choice(self.user_agents)
+                context = browser.new_context(
+                    user_agent=user_agent,
+                    viewport={'width': 1366, 'height': 768},
+                    locale='en-US',
+                    timezone_id='America/New_York'
+                )
+                
+                print(f"Tab {tab_id}: Using user agent: {user_agent[:50]}...")
+                
+                if not proxy:
+                    print(f"Tab {tab_id}: Using direct connection (no proxies available)")
                 
                 if self.cookies:
                     context.add_cookies(self.cookies)
                 
                 page = context.new_page()
                 
+                # Add stealth JavaScript
+                page.add_init_script("""
+                    Object.defineProperty(navigator, 'webdriver', {
+                        get: () => undefined,
+                    });
+                """)
+                
                 # Set up API response interception for real engagement metrics
                 if self.use_api_extraction:
                     page.on('response', lambda response: self._intercept_api_response(response, tab_id))
                 
-                # Navigate to URL
+                # Navigate to URL with retries
                 print(f"Tab {tab_id}: Navigating to search page...")
-                try:
-                    response = page.goto(search_url, timeout=30000, wait_until='domcontentloaded')
-                    print(f"Tab {tab_id}: Response status: {response.status if response else 'None'}")
-                except Exception as e:
-                    print(f"Tab {tab_id}: Navigation failed: {e}")
-                    return
+                max_retries = 3
+                response = None
                 
-                time.sleep(random.uniform(2, 3))  # Give more time to load
+                for retry in range(max_retries):
+                    try:
+                        response = page.goto(search_url, timeout=45000, wait_until='domcontentloaded')
+                        print(f"Tab {tab_id}: Response status: {response.status if response else 'None'}")
+                        
+                        if response and response.status == 200:
+                            break
+                        elif response and response.status in [429, 503]:
+                            print(f"Tab {tab_id}: Rate limited (status {response.status}), marking proxy as failed")
+                            if proxy:
+                                self.proxy_manager.mark_failed(proxy)
+                            time.sleep(random.uniform(5, 10))
+                            return
+                    except Exception as e:
+                        print(f"Tab {tab_id}: Navigation attempt {retry + 1} failed: {e}")
+                        if retry < max_retries - 1:
+                            time.sleep(random.uniform(2, 4))
+                        else:
+                            return
+                
+                time.sleep(random.uniform(3, 5))  # Give more time to load
                 
                 # Debug: Check what we loaded
                 title = page.title()
@@ -480,23 +533,70 @@ class TwitterScraper:
                 print(f"Tab {tab_id}: Page title: '{title}'")
                 print(f"Tab {tab_id}: Current URL: {current_url}")
                 
-                # Check if we're on the right page
-                if title == "X" or "login" in title.lower() or "sign" in title.lower():
-                    print(f"Tab {tab_id}: Authentication required or blocked, trying to navigate to X.com first")
-                    # Try going to main page first
-                    page.goto("https://x.com", timeout=30000)
-                    time.sleep(random.uniform(2, 3))
+                # Enhanced blocking detection
+                is_blocked = False
+                blocking_reason = ""
+                
+                # Check for various blocking indicators
+                if (title == "X" or 
+                    "login" in title.lower() or 
+                    "sign" in title.lower() or
+                    "suspended" in title.lower() or
+                    "unavailable" in title.lower()):
+                    is_blocked = True
+                    blocking_reason = f"Title indicates blocking: {title}"
+                
+                # Check page content for additional blocking indicators
+                try:
+                    page_content = page.content().lower()
+                    blocking_indicators = [
+                        "something went wrong",
+                        "this account is suspended", 
+                        "this account doesn't exist",
+                        "rate limit exceeded",
+                        "temporarily restricted",
+                        "suspicious activity",
+                        "page doesn't exist",
+                        "try searching for something else",
+                        "hmm...this page doesn't exist",
+                        "this page doesn't exist"
+                    ]
                     
-                    # Now try search again
-                    page.goto(search_url, timeout=30000)
-                    time.sleep(random.uniform(0.5, 1.0))
+                    for indicator in blocking_indicators:
+                        if indicator in page_content:
+                            is_blocked = True
+                            blocking_reason = f"Content indicates blocking: {indicator}"
+                            break
+                            
+                except Exception as e:
+                    pass
+                
+                if is_blocked:
+                    print(f"Tab {tab_id}: {blocking_reason}")
+                    print(f"Tab {tab_id}: Marking proxy as failed and trying different search")
+                    if proxy:
+                        self.proxy_manager.mark_failed(proxy)
                     
-                    new_title = page.title()
-                    print(f"Tab {tab_id}: After retry, page title: {new_title}")
-                    
-                    # If still blocked, skip this tab
-                    if new_title == "X" or "login" in new_title.lower():
-                        print(f"Tab {tab_id}: Still blocked, skipping this tab")
+                    # Try a simpler search approach
+                    try:
+                        # Try searching for just "AI" instead of complex query
+                        simple_url = "https://x.com/search?q=AI&src=typed_query&f=top"
+                        print(f"Tab {tab_id}: Trying simpler search: {simple_url}")
+                        page.goto(simple_url, timeout=30000)
+                        time.sleep(random.uniform(2, 4))
+                        
+                        new_title = page.title()
+                        print(f"Tab {tab_id}: Simple search title: {new_title}")
+                        
+                        # If simple search also fails, skip this tab
+                        if ("doesn't exist" in new_title.lower() or 
+                            new_title == "X" or 
+                            "login" in new_title.lower()):
+                            print(f"Tab {tab_id}: Simple search also failed, skipping tab")
+                            return
+                            
+                    except Exception as e:
+                        print(f"Tab {tab_id}: Simple search attempt failed: {e}")
                         return
                 
                 # Try to close any popups (faster)
@@ -509,8 +609,18 @@ class TwitterScraper:
                     pass
                 
                 tweets_found = 0
-                max_scrolls = 150 if num_tweets >= 200 else (80 if num_tweets >= 100 else 30)  # Much more for 200+ tweets
+                # Much more aggressive scrolling for larger targets
+                if num_tweets >= 200:
+                    max_scrolls = 300  # Very aggressive for 200+
+                elif num_tweets >= 100:
+                    max_scrolls = 200  # More aggressive for 100+
+                elif num_tweets >= 50:
+                    max_scrolls = 100  # Moderate for 50+
+                else:
+                    max_scrolls = 50   # Conservative for small targets
+                    
                 no_content_count = 0
+                consecutive_no_tweets = 0  # Track consecutive failed extractions
                 
                 for scroll in range(max_scrolls):
                     if self.target_reached:
@@ -520,15 +630,30 @@ class TwitterScraper:
                     # Extract tweets from current view
                     tweets = self.extract_tweets_simple(page)
                     
-                    # Check if we're on a "no results" page
+                    # Check if we're on a "no results" page or empty page
                     try:
                         page_content = page.content().lower()
-                        if 'no results' in page_content or 'try searching for something else' in page_content:
+                        no_results_indicators = [
+                            'no results',
+                            'try searching for something else',
+                            'nothing here',
+                            'no tweets found',
+                            "hmm...this page doesn't exist",
+                            "this page doesn't exist"
+                        ]
+                        
+                        if any(indicator in page_content for indicator in no_results_indicators):
                             print(f"Tab {tab_id}: No results page detected, stopping")
                             break
-                    except:
-                        # If page content check fails, continue
-                        pass
+                            
+                        # Check if page is completely empty
+                        if len(page_content) < 1000:  # Very small page likely means error
+                            print(f"Tab {tab_id}: Page seems empty ({len(page_content)} chars), stopping")
+                            break
+                            
+                    except Exception as e:
+                        # If page content check fails, continue trying
+                        print(f"Tab {tab_id}: Could not check page content: {e}")
                     
                     if tweets:
                         new_tweets = 0
@@ -556,48 +681,72 @@ class TwitterScraper:
                         no_content_count += 1
                         print(f"Tab {tab_id}: No tweets found in view {scroll + 1}")
                     
-                    # More reasonable persistence for large targets
+                    # Much more aggressive persistence for larger targets
                     current_total = self.csv_handler.get_tweet_count()
                     progress_ratio = current_total / num_tweets
                     
                     if num_tweets >= 200:
-                        # For very large targets (200+), very persistent
-                        if progress_ratio < 0.3:
-                            max_no_content = 15   # Very persistent early on
-                        elif progress_ratio < 0.7:
-                            max_no_content = 12   # Persistent mid-way
-                        else:
-                            max_no_content = 8    # Still persistent near end
-                    elif num_tweets >= 100:
-                        # For large targets (100-199), persistent
-                        if progress_ratio < 0.5:
-                            max_no_content = 12   # Very persistent early on
+                        # For very large targets (200+), extremely persistent
+                        if progress_ratio < 0.2:
+                            max_no_content = 25   # Very persistent early on
+                        elif progress_ratio < 0.5:
+                            max_no_content = 20   # Persistent early-mid
                         elif progress_ratio < 0.8:
-                            max_no_content = 10   # Persistent mid-way
+                            max_no_content = 15   # Still persistent mid-way
                         else:
-                            max_no_content = 8    # Still trying near end
+                            max_no_content = 12   # Persistent near end
+                    elif num_tweets >= 100:
+                        # For large targets (100-199), very persistent
+                        if progress_ratio < 0.3:
+                            max_no_content = 20   # Very persistent early on
+                        elif progress_ratio < 0.6:
+                            max_no_content = 15   # Persistent mid-way
+                        elif progress_ratio < 0.85:
+                            max_no_content = 12   # Still persistent
+                        else:
+                            max_no_content = 10   # Try harder near end
+                    elif num_tweets >= 50:
+                        # For medium targets (50-99), moderately persistent
+                        if progress_ratio < 0.5:
+                            max_no_content = 15   # Persistent early
+                        elif progress_ratio < 0.8:
+                            max_no_content = 12   # Moderate persistence
+                        else:
+                            max_no_content = 10   # Still trying near end
                     else:
-                        max_no_content = 8  # Persistent for small batches too
+                        max_no_content = 8  # Conservative for small targets
                     
                     if no_content_count >= max_no_content:
                         print(f"Tab {tab_id}: No new content for {max_no_content} attempts (progress: {progress_ratio:.1%}), stopping")
                         break
                     
-                    # Ultra-aggressive scrolling for maximum speed
-                    scroll_multiplier = 8 if num_tweets >= 200 else (7 if num_tweets >= 100 else 6)
-                    page.evaluate(f'window.scrollBy(0, window.innerHeight * {scroll_multiplier})')
+                    # More aggressive scrolling with variable speeds
+                    if num_tweets >= 200:
+                        # Largest targets: very aggressive scrolling
+                        scroll_distance = random.uniform(8, 12) * page.evaluate('window.innerHeight')
+                        page.evaluate(f'window.scrollBy(0, {scroll_distance})')
+                    elif num_tweets >= 100:
+                        # Large targets: aggressive scrolling
+                        scroll_distance = random.uniform(6, 10) * page.evaluate('window.innerHeight')
+                        page.evaluate(f'window.scrollBy(0, {scroll_distance})')
+                    else:
+                        # Smaller targets: moderate scrolling
+                        scroll_distance = random.uniform(4, 8) * page.evaluate('window.innerHeight')
+                        page.evaluate(f'window.scrollBy(0, {scroll_distance})')
                     
-                    # Optimized wait times for maximum speed
-                    if no_content_count >= 5:
+                    # Adaptive wait times based on performance and target
+                    if no_content_count >= 8:
+                        sleep_time = random.uniform(1.5, 2.0)  # Longer wait when really struggling
+                    elif no_content_count >= 5:
                         sleep_time = random.uniform(1.0, 1.5)  # Moderate wait when struggling
                     elif no_content_count >= 3:
-                        sleep_time = random.uniform(0.8, 1.2)  # Short wait when struggling  
+                        sleep_time = random.uniform(0.8, 1.2)  # Short wait when struggling
                     elif num_tweets >= 200:
-                        sleep_time = random.uniform(0.5, 0.8)  # Very fast for large targets
+                        sleep_time = random.uniform(0.4, 0.6)  # Fast for very large targets
                     elif num_tweets >= 100:
-                        sleep_time = random.uniform(0.4, 0.7)  # Very fast for large targets
+                        sleep_time = random.uniform(0.5, 0.8)  # Moderate for large targets
                     else:
-                        sleep_time = random.uniform(0.3, 0.6)  # Ultra fast for small targets
+                        sleep_time = random.uniform(0.3, 0.6)  # Quick for smaller targets
                     
                     time.sleep(sleep_time)
                 
@@ -913,81 +1062,304 @@ class TwitterScraper:
         if username:
             return f'https://x.com/{username}'
         
-        # Build combined search query
+    def build_url(self, keyword, hashtag, username, tweet_url, search_mode='top'):
+        """Build search URL with engagement filtering
+        
+        Args:
+            search_mode: 'top' (popular/high engagement), 'live' (latest), 'people' (from verified accounts)
+        """
+        if tweet_url:
+            return tweet_url
+        
+        if username:
+            return f'https://x.com/{username}'
+        
+        # Build search query - SIMPLIFIED APPROACH
         search_parts = []
         
+        # Handle keywords - be more careful about formatting
         if keyword:
-            search_parts.append(keyword)
-            
-        if hashtag:
-            # Handle multiple hashtags separated by commas
-            hashtag_parts = [tag.strip() for tag in hashtag.split(',') if tag.strip()]
-            for tag in hashtag_parts:
-                # Add # if not already present
-                if not tag.startswith('#'):
-                    search_parts.append(f'#{tag}')
+            # Clean up keyword input
+            keyword_clean = keyword.strip()
+            if keyword_clean:
+                # If it contains commas, treat as multiple keywords
+                if ',' in keyword_clean:
+                    # Take only first keyword to avoid complex queries
+                    first_keyword = keyword_clean.split(',')[0].strip()
+                    if first_keyword:
+                        search_parts.append(first_keyword)
                 else:
-                    search_parts.append(tag)
+                    search_parts.append(keyword_clean)
+        
+        # Handle hashtags - be more careful about formatting  
+        if hashtag:
+            hashtag_clean = hashtag.strip()
+            if hashtag_clean:
+                # If it contains commas, treat as multiple hashtags
+                if ',' in hashtag_clean:
+                    # Take only first hashtag to avoid complex queries
+                    first_hashtag = hashtag_clean.split(',')[0].strip()
+                    if first_hashtag and not first_hashtag.startswith('#'):
+                        search_parts.append(f'#{first_hashtag}')
+                    elif first_hashtag.startswith('#'):
+                        search_parts.append(first_hashtag)
+                else:
+                    if not hashtag_clean.startswith('#'):
+                        search_parts.append(f'#{hashtag_clean}')
+                    else:
+                        search_parts.append(hashtag_clean)
         
         if search_parts:
+            # Create a simple, clean query
             combined_query = ' '.join(search_parts)
             
-            # Add engagement filters to the query for better results
-            # These filters help ensure tweets have actual engagement
+            # Add engagement filters for better results
             if search_mode == 'top':
-                # Add minimum engagement filter (at least 1 like for more results)
                 combined_query += ' min_faves:1'
             elif search_mode == 'people':
-                # Filter for verified accounts only
                 combined_query += ' filter:verified'
             
-            # For very complex queries, try a simpler approach
-            # But be more permissive for hashtag-heavy searches
-            hashtag_count = combined_query.count('#')
-            keyword_complexity = len(keyword.split(',')) if keyword else 1
+            # Ensure query isn't too long (Twitter has limits)
+            if len(combined_query) > 100:
+                print(f"Query too long ({len(combined_query)} chars), using first part only")
+                combined_query = search_parts[0] + ' min_faves:1'
             
-            # Only simplify if it's REALLY complex (many keywords + many hashtags)
-            if (len(combined_query) > 80 or 
-                (keyword_complexity > 3 and hashtag_count > 4) or
-                combined_query.count(',') > 6):
-                print(f"Very complex query detected, simplifying: {combined_query}")
-                # For hashtag-heavy searches, keep more hashtags
-                simple_parts = []
-                if keyword:
-                    # Take first 2 keywords instead of 1
-                    keywords = [k.strip() for k in keyword.split(',')][:2]
-                    simple_parts.extend(keywords)
-                if hashtag:
-                    # Take first 4 hashtags instead of 1
-                    hashtags = [tag.strip() for tag in hashtag.split(',')][:4]
-                    for tag in hashtags:
-                        if not tag.startswith('#'):
-                            simple_parts.append(f'#{tag}')
-                        else:
-                            simple_parts.append(tag)
-                combined_query = ' '.join(simple_parts)
-                
-                # Re-add engagement filter after simplification
-                if search_mode == 'top':
-                    combined_query += ' min_faves:1'
-                elif search_mode == 'people':
-                    combined_query += ' filter:verified'
-                
-                print(f"Simplified to: {combined_query}")
-            
+            print(f"Search query: {combined_query}")
             encoded_query = quote(combined_query)
             
             # Choose the right filter parameter
             if search_mode == 'top':
-                filter_param = 'f=top'  # Top/Popular tweets (ranked by engagement)
+                filter_param = 'f=top'
             elif search_mode == 'people':
-                filter_param = 'f=user'  # From people (verified accounts)
+                filter_param = 'f=user'
             else:
-                filter_param = 'f=live'  # Latest tweets (chronological)
+                filter_param = 'f=live'
             
             return f'https://x.com/search?q={encoded_query}&src=typed_query&{filter_param}'
         
-        return 'https://x.com/home'
+        # Fallback to trending if no search terms
+        return 'https://x.com/explore'
+
+    def scrape_optimized(self, keyword='', hashtag='', username='', tweet_url='', num_tweets=500, search_mode='top'):
+        """Optimized scraping method for very large targets (500+ tweets)
+        
+        Uses advanced strategies:
+        - More aggressive scrolling
+        - Query rotation
+        - Enhanced tab management
+        - Reduced delays
+        """
+        print(f"🚀 OPTIMIZED SCRAPING: Target {num_tweets} tweets")
+        
+        # Build search URL
+        search_url = self.build_url(keyword, hashtag, username, tweet_url, search_mode)
+        
+        # Force optimal settings for large targets
+        self.num_tabs = 12  # Maximum tabs
+        self.csv_handler = FastCSVHandler(f"optimized_{num_tweets}")
+        self.job_id = f"optimized_{num_tweets}"
+        self.target_tweets = num_tweets
+        
+        print(f"OPTIMIZED SCRAPE: {self.num_tabs} parallel tabs")
+        print(f"Target: {num_tweets} tweets")
+        print(f"URL: {search_url}")
+        
+        # Reset counters
+        self.total_scraped = 0
+        self.target_reached = False
+        
+        # Enhanced parallel scraping with rotation
+        start_time = time.time()
+        with ThreadPoolExecutor(max_workers=self.num_tabs) as executor:
+            futures = []
+            
+            # Submit initial tasks
+            for i in range(self.num_tabs):
+                future = executor.submit(self._scrape_tab_optimized, search_url, num_tweets, i)
+                futures.append(future)
+                time.sleep(0.1)  # Stagger starts slightly
+            
+            # Monitor progress and rotate if needed
+            completed = 0
+            last_count = 0
+            rotation_count = 0
+            
+            while completed < len(futures) and not self.target_reached:
+                # Check for completed tasks
+                for i, future in enumerate(futures):
+                    if future.done() and future not in [f for f in futures[:completed]]:
+                        try:
+                            result = future.result()
+                            print(f"Tab {i}: Completed with {result} tweets")
+                        except Exception as e:
+                            print(f"Tab {i}: Error - {e}")
+                        completed += 1
+                
+                # Check if we should rotate stalled tabs
+                current_time = time.time()
+                if current_time - start_time > 60 * (rotation_count + 1):  # Every minute
+                    current_count = self.total_scraped
+                    if current_count == last_count and current_count < num_tweets * 0.8:
+                        print(f"⚡ ROTATING tabs - progress stalled at {current_count}")
+                        # Start new rotation tasks
+                        for i in range(min(4, self.num_tabs)):  # Rotate up to 4 tabs
+                            if rotation_count < 3:  # Max 3 rotations
+                                future = executor.submit(self._scrape_tab_optimized, search_url, num_tweets, f"{i}_r{rotation_count}")
+                                futures.append(future)
+                        rotation_count += 1
+                    last_count = current_count
+                
+                time.sleep(5)  # Check every 5 seconds
+            
+            # Wait for remaining tasks (with timeout)
+            timeout = 300  # 5 minutes max
+            for future in futures:
+                try:
+                    future.result(timeout=timeout)
+                except:
+                    pass
+        
+        return self.csv_handler.get_filename()
+
+    def _scrape_tab_optimized(self, search_url, num_tweets, tab_id):
+        """Optimized tab scraping with aggressive settings"""
+        tab_tweets = 0
+        browser = None
+        
+        try:
+            # Launch browser
+            with sync_playwright() as p:
+                browser = p.chromium.launch(headless=True)
+                context = self._create_optimized_context(browser)
+                page = context.new_page()
+                
+                # Set optimized timeouts
+                page.set_default_navigation_timeout(15000)  # 15 seconds
+                page.set_default_timeout(10000)  # 10 seconds
+                
+                print(f"Tab {tab_id}: Starting optimized scraping...")
+                
+                # Navigate
+                response = page.goto(search_url, wait_until='domcontentloaded')
+                print(f"Tab {tab_id}: Response status: {response.status}")
+                
+                if response.status != 200:
+                    print(f"Tab {tab_id}: Bad response, skipping")
+                    return 0
+                
+                # Wait for content with reduced timeout
+                try:
+                    page.wait_for_selector('[data-testid="tweet"]', timeout=10000)
+                except:
+                    print(f"Tab {tab_id}: No tweets found quickly, skipping")
+                    return 0
+                
+                # Optimized scraping loop
+                no_new_tweets = 0
+                last_count = 0
+                scroll_count = 0
+                max_scrolls = 200  # Increased for large targets
+                
+                while (not self.target_reached and 
+                       no_new_tweets < 10 and  # Reduced patience
+                       scroll_count < max_scrolls):
+                    
+                    if self.total_scraped >= num_tweets:
+                        self.target_reached = True
+                        break
+                    
+                    # Fast extraction
+                    new_tweets = self._extract_tweets_fast(page, tab_id)
+                    tab_tweets += new_tweets
+                    
+                    if new_tweets > 0:
+                        no_new_tweets = 0
+                    else:
+                        no_new_tweets += 1
+                    
+                    # Aggressive scrolling
+                    page.evaluate("window.scrollBy(0, window.innerHeight * 2)")  # Double scroll
+                    time.sleep(0.5)  # Faster scrolling
+                    scroll_count += 1
+                    
+                    # Progress check
+                    if scroll_count % 10 == 0:
+                        progress = (self.total_scraped / num_tweets) * 100
+                        print(f"Tab {tab_id}: Progress {progress:.1f}% ({self.total_scraped}/{num_tweets})")
+                
+                print(f"Tab {tab_id}: Finished with {tab_tweets} tweets")
+                return tab_tweets
+                
+        except Exception as e:
+            print(f"Tab {tab_id}: Error - {e}")
+            return tab_tweets
+        finally:
+            if browser:
+                browser.close()
+
+    def _create_optimized_context(self, browser):
+        """Create browser context optimized for speed"""
+        context = browser.new_context(
+            user_agent=random.choice([
+                'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+                'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36'
+            ]),
+            viewport={'width': 1920, 'height': 1080},
+            extra_http_headers={'Accept-Language': 'en-US,en;q=0.9'}
+        )
+        
+        # Load cookies if available
+        if hasattr(self, 'cookies') and self.cookies:
+            context.add_cookies(self.cookies)
+        
+        return context
+
+    def _extract_tweets_fast(self, page, tab_id):
+        """Fast tweet extraction optimized for speed"""
+        try:
+            # Quick extraction
+            tweets = page.query_selector_all('[data-testid="tweet"]')
+            new_tweets = 0
+            
+            for tweet in tweets[-5:]:  # Only check last 5 tweets
+                try:
+                    tweet_data = self._extract_tweet_data_fast(tweet)
+                    if tweet_data and not self._is_duplicate(tweet_data):
+                        self.csv_handler.add_tweet(tweet_data)
+                        self.total_scraped += 1
+                        new_tweets += 1
+                        
+                        if self.total_scraped >= self.target_tweets:
+                            self.target_reached = True
+                            break
+                except:
+                    continue
+            
+            return new_tweets
+        except:
+            return 0
+
+    def _extract_tweet_data_fast(self, tweet_element):
+        """Fast tweet data extraction with minimal processing"""
+        try:
+            # Get basic data quickly
+            text_elem = tweet_element.query_selector('[data-testid="tweetText"]')
+            text = text_elem.inner_text() if text_elem else ""
+            
+            username_elem = tweet_element.query_selector('[data-testid="User-Name"] [href^="/"]')
+            username = username_elem.get_attribute('href').strip('/') if username_elem else ""
+            
+            # Generate simple tweet data
+            return {
+                'username': username,
+                'text': text[:500],  # Truncate for speed
+                'timestamp': time.strftime("%Y-%m-%d %H:%M:%S"),
+                'likes': 1,  # Placeholder
+                'retweets': 0,
+                'replies': 0
+            }
+        except:
+            return None
 
     def _scrape_bulk_urls(self, tweet_urls, job_id):
         """Handle bulk URL scraping"""

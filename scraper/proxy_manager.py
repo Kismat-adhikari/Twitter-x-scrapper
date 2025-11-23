@@ -1,13 +1,16 @@
 import random
+import threading
 from typing import List, Optional
 
 class ProxyManager:
-    def __init__(self, proxy_file='proxies.txt', rotation_count=12):
+    def __init__(self, proxy_file='proxies.txt', rotation_count=3):  # Rotate more frequently
         self.proxies = []
         self.failed_proxies = set()
         self.current_index = 0
         self.rotation_count = rotation_count  # Rotate after N uses
         self.usage_count = 0  # Track how many times current proxy has been used
+        self.proxy_usage = {}  # Track usage per proxy
+        self.lock = threading.Lock()  # Thread safety for parallel tabs
         self.load_proxies(proxy_file)
     
     def load_proxies(self, proxy_file):
@@ -27,38 +30,35 @@ class ProxyManager:
         return self.get_proxy()
     
     def get_proxy(self) -> Optional[dict]:
-        """Get next available proxy with rotation after N uses"""
+        """Get next available proxy with proper rotation for parallel tabs"""
         if not self.proxies:
             return None
         
-        # Check if we need to rotate to next proxy
-        if self.usage_count >= self.rotation_count:
-            self.current_index = (self.current_index + 1) % len(self.proxies)
-            self.usage_count = 0
-            print(f"Rotating to proxy {self.current_index + 1}/{len(self.proxies)} (used previous proxy {self.rotation_count} times)")
-        
-        # Get current proxy
-        attempts = 0
-        while attempts < len(self.proxies):
-            proxy_str = self.proxies[self.current_index]
+        with self.lock:
+            # Find the least used, non-failed proxy
+            available_proxies = [p for p in self.proxies if p not in self.failed_proxies]
+            if not available_proxies:
+                # Reset failed proxies if all are failed
+                print("All proxies failed, resetting failed list...")
+                self.failed_proxies.clear()
+                available_proxies = self.proxies[:]
             
-            if proxy_str not in self.failed_proxies:
-                self.usage_count += 1
-                proxy_dict = self.parse_proxy(proxy_str)
-                if proxy_dict:
-                    proxy_dict['_usage_count'] = self.usage_count  # Track for debugging
-                return proxy_dict
+            # Sort by usage count (ascending) to get least used proxy
+            available_proxies.sort(key=lambda p: self.proxy_usage.get(p, 0))
             
-            # This proxy failed, try next one
-            self.current_index = (self.current_index + 1) % len(self.proxies)
-            self.usage_count = 0
-            attempts += 1
-        
-        # All proxies failed, reset and try again
-        print("All proxies failed, resetting failed list...")
-        self.failed_proxies.clear()
-        self.usage_count = 1
-        return self.parse_proxy(self.proxies[0]) if self.proxies else None
+            # Get the least used proxy
+            selected_proxy_str = available_proxies[0]
+            
+            # Update usage count
+            self.proxy_usage[selected_proxy_str] = self.proxy_usage.get(selected_proxy_str, 0) + 1
+            
+            proxy_dict = self.parse_proxy(selected_proxy_str)
+            if proxy_dict:
+                proxy_dict['_usage_count'] = self.proxy_usage[selected_proxy_str]
+                proxy_dict['_proxy_string'] = selected_proxy_str  # For failure tracking
+                print(f"Assigned proxy {selected_proxy_str.split(':')[0]} (usage: {self.proxy_usage[selected_proxy_str]})")
+            
+            return proxy_dict
     
     def parse_proxy(self, proxy_str: str) -> dict:
         """Parse proxy string into Playwright format"""
@@ -77,13 +77,46 @@ class ProxyManager:
             }
         return None
     
+    def get_random_proxy(self) -> Optional[dict]:
+        """Get a random proxy from available proxies"""
+        if not self.proxies:
+            return None
+        
+        with self.lock:
+            available_proxies = [p for p in self.proxies if p not in self.failed_proxies]
+            if not available_proxies:
+                # Reset if all failed
+                self.failed_proxies.clear()
+                available_proxies = self.proxies[:]
+            
+            if available_proxies:
+                selected_proxy_str = random.choice(available_proxies)
+                proxy_dict = self.parse_proxy(selected_proxy_str)
+                if proxy_dict:
+                    proxy_dict['_proxy_string'] = selected_proxy_str
+                return proxy_dict
+            
+        return None
+    
+    def reset_usage_counts(self):
+        """Reset all proxy usage counts"""
+        with self.lock:
+            self.proxy_usage.clear()
+            print("Reset all proxy usage counts")
+    
     def mark_failed(self, proxy_dict: dict):
         """Mark a proxy as failed"""
         if proxy_dict:
-            server = proxy_dict.get('server', '')
-            # Find original proxy string
-            for proxy_str in self.proxies:
-                if server in proxy_str:
-                    self.failed_proxies.add(proxy_str)
-                    print(f"Marked proxy as failed: {server}")
-                    break
+            with self.lock:
+                proxy_string = proxy_dict.get('_proxy_string')
+                if proxy_string:
+                    self.failed_proxies.add(proxy_string)
+                    print(f"Marked proxy as failed: {proxy_string.split(':')[0]}")
+                else:
+                    # Fallback method
+                    server = proxy_dict.get('server', '')
+                    for proxy_str in self.proxies:
+                        if server in proxy_str:
+                            self.failed_proxies.add(proxy_str)
+                            print(f"Marked proxy as failed: {server}")
+                            break
